@@ -1,0 +1,44 @@
+################################################################################
+# Hermes Desk Tab5 — menuconfig options
+#
+# Visible under "Hermes Desk Configuration" in `idf.py menuconfig`.
+# WiFi + bridge host can be set here at build time; runtime NVS provisioning
+# (MOT-81) will override WiFi creds at flash time later.
+################################################################################
+
+menu "Hermes Desk Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the network the Tab5 should join (via the ESP32-C6).
+            Leave blank to require runtime NVS provisioning (MOT-81).
+
+    config WIFI_PASS
+        string "WiFi Password"
+        default ""
+        help
+            WPA2 passphrase for the above SSID.
+
+    config BRIDGE_HOST
+        string "Bridge host or IP"
+        default "192.168.1.50"
+        help
+            Hostname or IP of the Hermes Desk bridge service
+            (the bridge/hermes_bridge server, default port 8765).
+
+    config BRIDGE_PORT
+        int "Bridge WebSocket port"
+        default 8765
+        help
+            WebSocket port the bridge listens on (PROTOCOL.md default 8765).
+
+    config BRIDGE_TOKEN
+        string "Bridge auth token"
+        default ""
+        help
+            Token sent as ?token= on the WS URL. Leave blank if the bridge
+            runs without auth (server.token = "" in config.yaml).
+
+endmenu
