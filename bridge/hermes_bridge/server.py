@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -18,6 +19,7 @@ from .tts import TTSClient
 from .gateway import GatewayClient
 from .pipeline import Pipeline
 from .session import Session, SessionRegistry
+from .notification import Notification, NotificationQueue, Priority, QuietHours
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +29,18 @@ class BridgeState:
 
     def __init__(self, cfg: BridgeConfig):
         self.cfg = cfg
+        # Notification queue
+        qh_cfg = cfg.notification.quiet_hours
+        quiet = QuietHours(
+            enabled=qh_cfg.enabled,
+            start_hour=qh_cfg.start_hour,
+            end_hour=qh_cfg.end_hour,
+        )
+        self.notifications = NotificationQueue(
+            quiet_hours=quiet,
+            max_history=cfg.notification.max_history,
+            ack_timeout=cfg.notification.ack_timeout,
+        )
         self.stt = STTClient(
             base_url=cfg.stt.base_url, model=cfg.stt.model,
             api_key=cfg.stt.api_key, timeout=cfg.stt.timeout,
@@ -76,26 +90,60 @@ def create_app(cfg: BridgeConfig) -> FastAPI:
 
     @app.post("/notify")
     async def notify(request_body: dict):
-        """Push a proactive notification to the connected Tab5."""
-        title = request_body.get("title", "Notification")
-        body = request_body.get("body", "")
-        level = request_body.get("level", "info")
-
+        """Enqueue a proactive notification for delivery to the Tab5."""
+        import uuid as _uuid
+        notif = Notification(
+            id=request_body.get("notification_id", str(_uuid.uuid4())[:8]),
+            title=request_body.get("title", "Notification"),
+            body=request_body.get("body", ""),
+            level=request_body.get("level", "info"),
+            priority=Priority(request_body.get("priority", 1)),
+            requires_ack=request_body.get("requires_ack", False),
+            category=request_body.get("category", "general"),
+            display_type=request_body.get("display_type", "card"),
+            source=request_body.get("source", "hermes"),
+            metadata=request_body.get("metadata", {}),
+        )
+        was_enqueued = await bridge.notifications.enqueue(notif)
+        if not was_enqueued:
+            return JSONResponse(
+                {"status": "suppressed", "reason": "quiet_hours"},
+                status_code=status.HTTP_202_ACCEPTED,
+            )
+        # Try immediate delivery if a device is connected
         session = await bridge.registry.any_session()
-        if session is None:
-            return JSONResponse(
-                {"error": "no device connected"},
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        try:
-            await session.connection.send_text(p.notify_out(title, body, level))
-        except Exception as exc:
-            log.warning("failed to push notify: %s", exc)
-            return JSONResponse(
-                {"error": "push failed"},
-                status_code=status.HTTP_502_BAD_GATEWAY,
-            )
-        return JSONResponse({"status": "queued"}, status_code=status.HTTP_202_ACCEPTED)
+        if session:
+            try:
+                await session.connection.send_text(p.notify_out(
+                    title=notif.title, body=notif.body, level=notif.level,
+                    notification_id=notif.id, priority=int(notif.priority),
+                    requires_ack=notif.requires_ack, category=notif.category,
+                    display_type=notif.display_type,
+                ))
+                bridge.notifications.delivered(notif)
+            except Exception as exc:
+                log.warning("immediate notify delivery failed: %s", exc)
+        return JSONResponse(
+            {"status": "queued", "notification_id": notif.id},
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+
+    @app.get("/notify/history")
+    async def notify_history():
+        """Return notification history."""
+        history = bridge.notifications.history
+        return {
+            "count": len(history),
+            "notifications": [
+                {
+                    "id": n.id, "title": n.title, "body": n.body,
+                    "level": n.level, "priority": n.priority.name,
+                    "category": n.category, "delivered_at": n.delivered_at,
+                    "acked_at": n.acked_at,
+                }
+                for n in history[-20:]
+            ],
+        }
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket):
@@ -162,6 +210,13 @@ def create_app(cfg: BridgeConfig) -> FastAPI:
 
                         elif isinstance(parsed, p.Abort):
                             bridge.pipeline.request_abort()
+
+                        elif isinstance(parsed, p.NotifyAck):
+                            bridge.notifications.ack(parsed.notification_id)
+                            await ws.send_text(json.dumps({
+                                "type": "ack_received",
+                                "notification_id": parsed.notification_id,
+                            }))
 
                     # Binary frame = PCM audio chunk
                     elif "bytes" in msg:

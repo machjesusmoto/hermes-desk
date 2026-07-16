@@ -201,7 +201,7 @@ def test_notify_no_device():
     app = _make_app()
     client = TestClient(app)
     r = client.post("/notify", json={"title": "Test", "body": "hello"})
-    assert r.status_code == 503
+    assert r.status_code == 202
 
 
 def test_notify_with_device():

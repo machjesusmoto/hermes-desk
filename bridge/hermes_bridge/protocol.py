@@ -40,7 +40,13 @@ class Abort:
     type: Literal["abort"] = "abort"
 
 
-InboundMessage = HelloIn | ListenStart | ListenStop | Abort
+@dataclass
+class NotifyAck:
+    notification_id: str
+    type: Literal["notify_ack"] = "notify_ack"
+
+
+InboundMessage = HelloIn | ListenStart | ListenStop | Abort | NotifyAck
 
 
 def parse_inbound(raw: str) -> InboundMessage:
@@ -62,6 +68,11 @@ def parse_inbound(raw: str) -> InboundMessage:
         raise ValueError(f"unknown listen action: {action}")
     if msg_type == "abort":
         return Abort()
+    if msg_type == "notify_ack":
+        nid = data.get("notification_id", "")
+        if not nid:
+            raise ValueError("notify_ack requires notification_id")
+        return NotifyAck(notification_id=nid)
     raise ValueError(f"unknown message type: {msg_type}")
 
 
@@ -123,10 +134,24 @@ def error_out(code: str, message: str = "") -> str:
     })
 
 
-def notify_out(title: str, body: str = "", level: str = "info") -> str:
+def notify_out(
+    title: str,
+    body: str = "",
+    level: str = "info",
+    notification_id: str = "",
+    priority: int = 1,
+    requires_ack: bool = False,
+    category: str = "general",
+    display_type: str = "card",
+) -> str:
     return json.dumps({
         "type": "notify",
         "title": title,
         "body": body,
         "level": level,
+        "notification_id": notification_id,
+        "priority": priority,
+        "requires_ack": requires_ack,
+        "category": category,
+        "display_type": display_type,
     })

@@ -54,6 +54,20 @@ class AudioConfig:
 
 
 @dataclass
+class QuietHoursConfig:
+    enabled: bool = False
+    start_hour: int = 22
+    end_hour: int = 7
+
+
+@dataclass
+class NotificationConfig:
+    max_history: int = 100
+    ack_timeout: float = 30.0
+    quiet_hours: QuietHoursConfig = field(default_factory=QuietHoursConfig)
+
+
+@dataclass
 class LogConfig:
     level: str = "INFO"
     json: bool = False
@@ -66,6 +80,7 @@ class BridgeConfig:
     tts: TTSConfig = field(default_factory=TTSConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    notification: NotificationConfig = field(default_factory=NotificationConfig)
     log: LogConfig = field(default_factory=LogConfig)
 
     @classmethod
@@ -77,7 +92,7 @@ class BridgeConfig:
                 data = yaml.safe_load(f) or {}
 
         cfg = cls()
-        for section_name in ("server", "stt", "tts", "gateway", "audio", "log"):
+        for section_name in ("server", "stt", "tts", "gateway", "audio", "notification", "log"):
             section_data = data.get(section_name, {})
             section_obj = getattr(cfg, section_name)
             for key, value in section_data.items():
