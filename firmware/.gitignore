@@ -1,0 +1,14 @@
+# ESP-IDF build artifacts
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+
+# Local credentials / secrets — never commit
+wifi_c6_fw/*.bin
+!wifi_c6_fw/.gitkeep
+
+# Editor
+.vscode/
+.idea/
