@@ -1,0 +1,14 @@
+services:
+  bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    ports:
+      - "8765:8765"
+    env_file:
+      - ./bridge/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # STT/TTS hostnames must resolve from inside the container.
+    # Add to /etc/hosts or use Docker network aliases.
+    restart: unless-stopped

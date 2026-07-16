@@ -1,12 +1,10 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-
-COPY bridge/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY bridge/bridge.py .
+COPY hermes_bridge/ hermes_bridge/
 
-EXPOSE 8080
-
-CMD ["python", "bridge.py"]
+EXPOSE 8765
+CMD ["python", "-m", "hermes_bridge.server"]

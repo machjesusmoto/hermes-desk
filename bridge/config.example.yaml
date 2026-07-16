@@ -1,0 +1,39 @@
+# Hermes Desk Bridge Configuration
+# Copy to config.yaml and edit. All values can be overridden by env vars:
+# HERMES_DESK_<SECTION>__<KEY> (e.g. HERMES_DESK_GATEWAY__API_KEY)
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+  token: ""  # Tab5 auth token; empty = no auth
+
+stt:
+  base_url: "http://gx10-fd05:11436/v1"  # Nemotron 0.6B STT
+  model: "nvidia/nemotron-0.6b-stt"
+  timeout: 10.0
+
+tts:
+  base_url: "http://gx10-39e5:11438/v1"  # Google Neural2-F
+  voice: "neural2-F"
+  model: "tts-1"
+  response_format: "wav"
+  timeout: 15.0
+
+gateway:
+  base_url: "http://host.docker.internal:8642"  # Hermes API server
+  chat_path: "/v1/chat/completions"
+  api_key: ""  # from Vault: secret/paperclip/services/hermes-gateway
+  model: "hermes"
+  session_id: "hermes-desk"
+  system_prompt: "You are Hermes, an AI assistant on a physical desk device. Respond concisely for voice output. Keep replies under 3 sentences unless the user asks for detail."
+  timeout: 30.0
+
+audio:
+  sample_rate: 16000
+  bits: 16
+  channels: 1
+  frame_bytes: 640  # 20ms @ 16k/16bit/mono
+
+log:
+  level: "INFO"
+  json: false
