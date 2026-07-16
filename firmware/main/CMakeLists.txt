@@ -1,0 +1,16 @@
+################################################################################
+# firmware/main — application entrypoint + device state machine
+################################################################################
+idf_component_register(
+    SRCS
+        "src/main.c"
+        "src/wifi_connect.c"
+        "src/ptt.c"
+        "src/app_state.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        "hermes_ws"
+        "hermes_audio"
+        "hermes_display"
+)
