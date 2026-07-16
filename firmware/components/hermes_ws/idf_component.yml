@@ -1,0 +1,4 @@
+## Pulls the official WebSocket client component.
+dependencies:
+  espressif/esp_websocket_client:
+    version: "^1.2"

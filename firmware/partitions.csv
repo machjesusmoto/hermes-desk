@@ -1,0 +1,21 @@
+# ESP32-P4 partition table — 16 MB flash (M5Stack Tab5).
+#
+# The Tab5's ESP32-C6 WiFi co-processor runs esp_hosted *slave* firmware that
+# must be stored on the P4's flash and loaded over SDIO at boot. We reserve a
+# dedicated `slave_fw` partition for the M5Stack-shipped
+# "ESP32C6-WiFi-SDIO-Interface" binary (see firmware/wifi_c6_fw/ and the
+# README's "Flashing the C6 co-processor" section).
+#
+# Layout (16 MB = 0x1000000):
+#   nvs       24 KB   - WiFi creds + runtime config (KVS)
+#   phy_init  4 KB    - PHY calibration data
+#   factory   7 MB    - application firmware
+#   slave_fw  2 MB    - ESP32-C6 esp_hosted slave firmware image
+#   spiffs    1 MB    - assets (fonts, icons) — reserved for M3/M4 display work
+
+# Name,     Type, SubType,  Offset,   Size,    Flags
+nvs,        data, nvs,      0x10000,  0x6000,
+phy_init,   data, phy,      0x16000,  0x1000,
+factory,    app,  factory,  0x20000,  0x700000,
+slave_fw,   data, 0x40,     0x720000, 0x200000,
+spiffs,     data, spiffs,   0x920000, 0x100000,

@@ -1,0 +1,6 @@
+## Relies on the Tab5 BSP for codec setup. The BSP is declared at the
+## project level (firmware/idf_component.yml) so it's available to all
+## components; we keep this manifest minimal.
+dependencies:
+  idf:
+    version: ">=5.4"

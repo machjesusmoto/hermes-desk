@@ -1,0 +1,10 @@
+# Place the M5Stack-shipped ESP32-C6 esp_hosted slave firmware here.
+#
+# File: ESP32C6-WiFi-SDIO-Interface-V1.4.1-96bea3a_0x0.bin
+# Source: https://github.com/m5stack/M5Tab5-UserDemo/tree/main/platforms/tab5/wifi_c6_fw
+#
+# This binary is flashed to the `slave_fw` partition (see partitions.csv) so
+# the ESP32-P4 can load the C6 co-processor firmware over SDIO at boot and
+# provide WiFi. It is NOT committed to this repo (see .gitignore) — download
+# it from the M5Tab5-UserDemo repo and drop it here before flashing, or use
+# the M5Stack flash.sh script to program the C6 directly (see README.md).
