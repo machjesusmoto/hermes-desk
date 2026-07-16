@@ -106,3 +106,17 @@ audio/visual feedback per level.
 - Bit depth: 16-bit signed little-endian
 - Channels: 1 (mono)
 - Frame size: 640 bytes (20ms of audio)
+
+## Display Specifications
+
+| Property | Value |
+|----------|-------|
+| Panel | 5" IPS, MIPI-DSI |
+| Resolution | 1280×720 |
+| Touch | GT911 capacitive (I2C) |
+| UI Framework | LVGL 9.x |
+
+Note: Gemini's initial research cited 1024×600. The shipping M5Stack Tab5 uses a
+1280×720 panel per the official Espressif BSP. LVGL reads the live panel size at
+init, so code works regardless, but protocol documentation should use the correct
+resolution.

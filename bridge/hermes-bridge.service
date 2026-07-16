@@ -1,0 +1,27 @@
+[Unit]
+Description=Hermes Desk Bridge Service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes-bridge
+Group=hermes-bridge
+WorkingDirectory=/opt/hermes-desk/bridge
+EnvironmentFile=/etc/hermes-bridge/env
+ExecStart=/opt/hermes-desk/bridge/.venv/bin/python -m hermes_bridge
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-bridge
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/hermes-desk/bridge
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
