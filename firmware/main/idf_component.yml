@@ -1,0 +1,6 @@
+## main component pulls in esp_hosted/wifi_remote at the project level
+## (declared in firmware/idf_component.yml) so app code just calls esp_wifi_*.
+
+dependencies:
+  idf:
+    version: ">=5.4"
