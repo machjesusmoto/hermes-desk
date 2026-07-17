@@ -14,7 +14,7 @@ menu "Hermes Desk Configuration"
 
     config BRIDGE_HOST
         string "Bridge Host IP"
-        default "10.0.2.64"
+        default "192.168.54.193"
         help
             IP address of the host running the Hermes Desk bridge service.
 

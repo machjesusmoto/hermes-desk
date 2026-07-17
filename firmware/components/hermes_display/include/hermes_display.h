@@ -84,6 +84,13 @@ void hermes_display_set_layout(hermes_layout_t layout);
 /** Boot/splash screen with the WiFi status line (used during connect). */
 void hermes_display_show_boot(const char *wifi_status);
 
+/**
+ * Register touch-to-talk on the screen. LVEL PRESSED → app_state PTT_PRESS,
+ * RELEASED → PTT_RELEASE. Must be called after app_state_init() and
+ * hermes_display_init().
+ */
+void hermes_display_register_touch_ptt(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -58,10 +58,10 @@ static void set_disp(app_state_t st)
 {
     switch (st) {
     case APP_STATE_BOOT:       hermes_display_set_state(HERMES_DISP_BOOT, NULL); break;
-    case APP_STATE_IDLE:       hermes_display_set_state(HERMES_DISP_IDLE, "Hold the side button to talk"); break;
+    case APP_STATE_IDLE:       hermes_display_set_state(HERMES_DISP_IDLE, "Tap and hold to talk"); break;
     case APP_STATE_LISTENING:  hermes_display_set_state(HERMES_DISP_LISTENING, "Release to send"); break;
     case APP_STATE_PROCESSING: hermes_display_set_state(HERMES_DISP_PROCESSING, ""); break;
-    case APP_STATE_SPEAKING:   hermes_display_set_state(HERMES_DISP_SPEAKING, "Tap button to interrupt"); break;
+    case APP_STATE_SPEAKING:   hermes_display_set_state(HERMES_DISP_SPEAKING, "Tap to interrupt"); break;
     case APP_STATE_ERROR:      hermes_display_set_state(HERMES_DISP_ERROR, ""); break;
     }
 }

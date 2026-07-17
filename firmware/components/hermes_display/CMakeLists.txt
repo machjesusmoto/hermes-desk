@@ -11,4 +11,5 @@ idf_component_register(
         esp_lvgl_port
         lvgl
         log
+        main
 )

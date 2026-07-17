@@ -5,15 +5,15 @@ idf_component_register(
     SRCS
         "src/main.c"
         "src/wifi_connect.c"
-        "src/ptt.c"
         "src/app_state.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
-        "hermes_ws"
-        "hermes_audio"
-        "hermes_display"
-        "esp_hosted"
+        hermes_ws
+        hermes_audio
+        hermes_display
+        esp_hosted
+        m5stack_tab5
     PRIV_REQUIRES
         "json"
 )

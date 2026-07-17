@@ -20,6 +20,12 @@
 CONFIG_IDF_TARGET="esp32p4"
 CONFIG_IDF_TARGET_ESP32P4=y
 
+# Required by esp_wifi_remote's Kconfig: it uses orsource with $ESP_IDF_VERSION
+# to pick the right Kconfig.idf_v*.in file. Without this env var (set in the
+# build environment, not here), the orsource silently fails and no WIFI_RMT_*
+# symbols are defined, causing compile errors in the injected esp_wifi.h.
+# The env var is set in the build script / export.sh call.
+
 # Tab5 uses ESP32-P4 revision v1.x (eco2 silicon). Allow any rev so the
 # bootloader doesn't reject the chip. Default is v3.01 which causes a
 # "requires chip revision in range [v3.1 - v3.99]" flash error on v1.3 silicon.
@@ -91,14 +97,20 @@ CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
 # (esp-hosted-mcu issue #127, May 2026 comment).
 CONFIG_ESP_HOSTED_HOST_CP_RESET_STRATEGY_ONLY_IF_NECESSARY=y
 
+# Disable the pre-app_main constructor: the C6 has no power until
+# bsp_feature_enable(BSP_FEATURE_WIFI) is called from app_main. The
+# auto-init constructor runs before app_main and tries to talk to the
+# unpowered C6, corrupting the transport state for the rest of the boot.
+# We keep AUTO_FEAT_INIT=y so esp_hosted_init() can use the auto-init
+# walker when we call it manually from wifi_connect_start(), but we
+# disable the constructor that runs before app_main.
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
 # Throughput / buffering tuned for streaming PCM audio over WiFi.
-CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
-CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64
-CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=64
-CONFIG_WIFI_RMT_AMPDU_TX_ENABLED=y
-CONFIG_WIFI_RMT_TX_BA_WIN=32
-CONFIG_WIFI_RMT_AMPDU_RX_ENABLED=y
-CONFIG_WIFI_RMT_RX_BA_WIN=32
+# Note: WIFI_RMT_* symbols are provided by esp_wifi_remote's Kconfig.
+# Don't set them in sdkconfig.defaults — they're multi-definition aliases
+# that don't resolve properly during sdkconfig generation. The component
+# defaults are sufficient for our use case.
 
 # LWIP — bigger TCP windows for low-latency audio over the WS link.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65534

@@ -165,7 +165,7 @@ static void build_ui(void)
 
     s_d.status_hint = lv_label_create(s_d.status_cont);
     lv_obj_set_style_text_font(s_d.status_hint, &lv_font_montserrat_24, 0);
-    lv_label_set_text(s_d.status_hint, "Hold the side button to talk");
+    lv_label_set_text(s_d.status_hint, "Tap and hold to talk");
     lv_obj_set_style_text_color(s_d.status_hint, COLOR_MUTED, 0);
     lv_obj_set_style_pad_top(s_d.status_hint, 24, 0);
 
@@ -329,6 +329,38 @@ void hermes_display_set_layout(hermes_layout_t layout)
     if (!display_lock(500)) return;
     show_layout(layout);   /* pointer-based; robust to child ordering */
     display_unlock();
+}
+
+/* ---- touch-to-talk ------------------------------------------------------- */
+/* The Tab5 has no usable physical button (the only button is reset). We use
+ * the touchscreen: press-and-hold = listen, release = send. This mirrors the
+ * PTT semantics (APP_EVT_PTT_PRESS / RELEASE) so the FSM is unchanged. */
+#include "app_state.h"
+
+static void touch_ptt_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) {
+        app_state_handle_event(APP_EVT_PTT_PRESS);
+    } else if (code == LV_EVENT_RELEASED) {
+        app_state_handle_event(APP_EVT_PTT_RELEASE);
+    }
+}
+
+void hermes_display_register_touch_ptt(void)
+{
+    if (!display_lock(2000)) {
+        ESP_LOGE(TAG, "LVGL lock timeout during touch_ptt register");
+        return;
+    }
+    /* Attach to the screen object so the entire touchscreen is a PTT surface. */
+    lv_obj_add_event_cb(s_d.screen, touch_ptt_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(s_d.screen, touch_ptt_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_clear_flag(s_d.screen, LV_OBJ_FLAG_SCROLLABLE);
+    /* Make the screen clickable. */
+    lv_obj_add_flag(s_d.screen, LV_OBJ_FLAG_CLICKABLE);
+    display_unlock();
+    ESP_LOGI(TAG, "touch-to-talk registered on screen");
 }
 
 void hermes_display_show_boot(const char *wifi_status)

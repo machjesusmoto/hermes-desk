@@ -2,15 +2,21 @@
  * @file wifi_connect.c
  * @brief WiFi bring-up for the ESP32-P4 + ESP32-C6 (esp_hosted) Tab5.
  *
- * INIT ORDER (load-bearing — esp_hosted must precede esp_wifi):
+ * COLD BOOT SEQUENCE (load-bearing order):
  *   1. nvs_flash_init            (config + WiFi creds)
- *   2. esp_hosted_init / connect_to_slave   (SDIO link to the C6)
- *   3. esp_netif_init + event loop
- *   4. esp_wifi_init + start + connect
+ *   2. esp_netif_init + event loop  (tcpip thread must exist before esp_hosted)
+ *   3. bsp_feature_enable(BSP_FEATURE_WIFI, true)  (powers on the C6 via IO expander)
+ *   4. vTaskDelay(500ms)         (let the C6 boot its firmware)
+ *   5. esp_hosted_init           (SDIO transport + protocol handshake)
+ *   6. esp_wifi_init + start + connect
  *
- * Get this order wrong and you see `sdmmc_init_ocr: send_op_cond returned
- * 0x107` and a zero MAC — the classic P4+C6 failure mode (esp-hosted #127).
- * The SDIO GPIOs + reset polarity live in sdkconfig.defaults.
+ * The C6 is powered through a PI4IOE5V6408 IO-expander on the second I2C bus.
+ * The BSP's display init initializes the first IO expander (for backlight).
+ * bsp_feature_enable(BSP_FEATURE_WIFI, true) initializes the second IO expander
+ * and enables the C6 power pin (BSP_WIFI_EN = IO_EXPANDER_PIN_NUM_0).
+ *
+ * Auto-init is DISABLED in sdkconfig.defaults because it runs before app_main
+ * when the C6 has no power, corrupting the transport state.
  */
 #include "wifi_connect.h"
 #include "hermes_display.h"
@@ -25,6 +31,9 @@
 #include "esp_event.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+
+/* BSP for C6 power control via IO expander. */
+#include "bsp/m5stack_tab5.h"
 
 /* esp_hosted transport to the C6 co-processor. */
 #include "esp_hosted.h"
@@ -62,7 +71,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     if (base != WIFI_EVENT) return;
     switch (id) {
     case WIFI_EVENT_STA_START:
-        ESP_LOGI(TAG, "STA started, connecting\u2026");
+        ESP_LOGI(TAG, "STA started, connecting…");
         esp_wifi_connect();
         break;
     case WIFI_EVENT_STA_DISCONNECTED:
@@ -86,35 +95,74 @@ esp_err_t wifi_connect_start(void)
     ESP_ERROR_CHECK(ret);
 
     /* 2. Network stack + event loop — MUST come before esp_hosted_init()
-     *    because esp_hosted_connect_to_slave() triggers LWIP traffic on the
-     *    SDIO link. Without esp_netif_init() the tcpip thread doesn't exist
-     *    yet, causing: assert failed: tcpip_send_msg_wait_sem. */
+     *    because esp_hosted_init() triggers LWIP traffic on the SDIO link.
+     *    Without esp_netif_init() the tcpip thread doesn't exist yet, causing:
+     *    assert failed: tcpip_send_msg_wait_sem. */
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    hermes_display_show_boot("Starting radio (C6)\u2026");
+    hermes_display_show_boot("Powering on C6…");
 
-    /* 3. esp_hosted: The SDIO transport is auto-initialized during system
-     *    startup (eh_auto_init runs before app_main). The C6 is already
-     *    powered on and the SDIO link is already established. We just need
-     *    to complete the hosted handshake. Do NOT power-cycle the C6 or
-     *    re-init the transport — that causes an unrecoverable SDIO state. */
-    ESP_LOGI(TAG, "connecting to C6 via esp_hosted (auto-initialized)\u2026");
-    hermes_display_show_boot("Connecting to C6\u2026");
-    esp_err_t err = esp_hosted_connect_to_slave();
+    /* 3. Power on the C6 co-processor via the BSP IO expander.
+     *    The C6's 3V3 is controlled by the second PI4IOE5V6408 IO expander,
+     *    pin 0 (BSP_WIFI_EN). bsp_feature_enable initializes the expander
+     *    and sets the pin high, powering the C6. */
+    ESP_LOGI(TAG, "powering on C6 via IO expander…");
+    esp_err_t pw = bsp_feature_enable(BSP_FEATURE_WIFI, true);
+    if (pw != ESP_OK) {
+        ESP_LOGW(TAG, "bsp_feature_enable(WIFI) returned %s — continuing", esp_err_to_name(pw));
+    }
+
+    /* 4. Give the C6 time to boot its firmware after power-on. */
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    /* 5. esp_hosted: init the SDIO transport and complete the protocol
+     *    handshake. Auto-init is disabled, so this is the first time the
+     *    transport touches the C6. The C6 is now powered and ready. */
+    ESP_LOGI(TAG, "initializing esp_hosted transport…");
+    hermes_display_show_boot("Connecting to C6…");
+
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 1; attempt <= 5; attempt++) {
+        /* esp_hosted_init() sets up the SDIO transport and starts the
+         * protocol handshake. esp_hosted_connect_to_slave() waits for
+         * the INIT event from the C6 firmware. */
+        if (attempt == 1) {
+            err = esp_hosted_init();
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "esp_hosted_init failed: %s", esp_err_to_name(err));
+                /* Retry: power-cycle the C6 */
+                bsp_feature_enable(BSP_FEATURE_WIFI, false);
+                vTaskDelay(pdMS_TO_TICKS(200));
+                bsp_feature_enable(BSP_FEATURE_WIFI, true);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                err = esp_hosted_init();
+            }
+        }
+
+        err = esp_hosted_connect_to_slave();
+        if (err == ESP_OK) break;
+        ESP_LOGW(TAG, "esp_hosted_connect_to_slave attempt %d/5 failed: %s",
+                 attempt, esp_err_to_name(err));
+        if (attempt < 5) {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "C6 retry %d/5…", attempt);
+            hermes_display_show_boot(buf);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_hosted_connect_to_slave failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "esp_hosted_connect_to_slave failed after 5 attempts: %s", esp_err_to_name(err));
         hermes_display_show_boot("C6 slave not responding");
         return err;
     }
     ESP_LOGI(TAG, "C6 link up");
 
-    /* 4. WiFi netif + event handlers. */
+    /* 6. WiFi netif + event handlers. */
     esp_netif_create_default_wifi_sta();
 
     s_wifi_events = xEventGroupCreate();
 
-    /* 4. WiFi — now safe to call. */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
@@ -139,7 +187,7 @@ esp_err_t wifi_connect_start(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "wifi STA started — waiting for IP (ssid=%s)", CONFIG_WIFI_SSID);
-    hermes_display_show_boot("WiFi: connecting\u2026");
+    hermes_display_show_boot("WiFi: connecting…");
 
     /* Block until IP (or fail). Give it generous time for the C6 link. */
     EventBits_t bits = xEventGroupWaitBits(s_wifi_events,

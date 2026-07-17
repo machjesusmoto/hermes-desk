@@ -18,7 +18,6 @@
 #include "hermes_audio.h"
 #include "hermes_ws.h"
 #include "wifi_connect.h"
-#include "ptt.h"
 #include "app_state.h"
 
 #include <string.h>
@@ -160,9 +159,9 @@ void app_main(void)
         ESP_LOGE(TAG, "ws start failed: %s", esp_err_to_name(wsr));
     }
 
-    /* 6. PTT button. */
-    ESP_ERROR_CHECK(ptt_init());
+    /* 6. Touch-to-talk (no physical button on the Tab5). */
+    hermes_display_register_touch_ptt();
 
-    ESP_LOGI(TAG, "init complete — idle, waiting for PTT");
+    ESP_LOGI(TAG, "init complete — idle, waiting for touch");
     /* main task returns; FreeRTOS keeps the other tasks alive. */
 }
