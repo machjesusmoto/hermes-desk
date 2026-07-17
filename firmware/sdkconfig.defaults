@@ -20,6 +20,14 @@
 CONFIG_IDF_TARGET="esp32p4"
 CONFIG_IDF_TARGET_ESP32P4=y
 
+# Tab5 uses ESP32-P4 revision v1.x (eco2 silicon). Allow any rev so the
+# bootloader doesn't reject the chip. Default is v3.01 which causes a
+# "requires chip revision in range [v3.1 - v3.99]" flash error on v1.3 silicon.
+# ESP32P4_SELECTS_REV_LESS_V3 is the Kconfig gate for <3.0 support — must be
+# set before ESP32P4_REV_MIN_0 becomes selectable.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_0=y
+
 # The Tab5 ships 16 MB flash. Match partitions.csv.
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
@@ -43,21 +51,45 @@ CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
 
 # Do NOT use the dev-board GPIO preset; we supply the Tab5 pins explicitly.
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_NONE=y
 CONFIG_ESP_HOSTED_DEV_BOARD_GPIO_CONFIG=n
 
 # Hosted SDIO pin map (Tab5):
-CONFIG_ESP_HOSTED_SDIO CLK_GPIO=12
-CONFIG_ESP_HOSTED_SDIO CMD_GPIO=13
-CONFIG_ESP_HOSTED_SDIO D0_GPIO=11
-CONFIG_ESP_HOSTED_SDIO D1_GPIO=10
-CONFIG_ESP_HOSTED_SDIO D2_GPIO=9
-CONFIG_ESP_HOSTED_SDIO D3_GPIO=8
-CONFIG_ESP_HOSTED_SDIO SLAVE_RST_GPIO=15
+# The Kconfig uses RANGE_MIN as the actual GPIO value when no dev board is selected.
+# Tab5 pins per M5Stack schematic + esp-hosted-mcu issue #127:
+#   CMD=13, CLK=12, D0=11, D1=10, D2=9, D3=8, RESET=15
+CONFIG_ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MIN=13
+CONFIG_ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MAX=13
+CONFIG_ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MIN=12
+CONFIG_ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MAX=12
+CONFIG_ESP_HOSTED_SDIO_D0_GPIO_RANGE_MIN=11
+CONFIG_ESP_HOSTED_SDIO_D0_GPIO_RANGE_MAX=11
+CONFIG_ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN=10
+CONFIG_ESP_HOSTED_SDIO_D1_GPIO_RANGE_MAX=10
+CONFIG_ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN=9
+CONFIG_ESP_HOSTED_SDIO_D2_GPIO_RANGE_MAX=9
+CONFIG_ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN=8
+CONFIG_ESP_HOSTED_SDIO_D3_GPIO_RANGE_MAX=8
+CONFIG_ESP_HOSTED_SDIO_RESET_SLAVE_GPIO_MIN=15
+CONFIG_ESP_HOSTED_SDIO_RESET_SLAVE_GPIO_MAX=15
+# Actual GPIO pin assignments (override the dev-board defaults):
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CMD=13
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CLK=12
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D0=11
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D1=10
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D2=9
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D3=8
+CONFIG_ESP_HOSTED_HOST_RESET_GPIO=15
 
 # Reset polarity: the Tab5's C6 reset line is active-HIGH. The esp-hosted
 # default assumes active-low, which leaves the C6 held in reset and the link
 # never comes up. (See esp-hosted-mcu issue #127, comment re: sdio_drv.c.)
 CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+
+# Reset strategy: try card init WITHOUT resetting first, only reset if it fails.
+# The ALWAYS strategy has a bug on the Tab5 where the C6 is left held in reset
+# (esp-hosted-mcu issue #127, May 2026 comment).
+CONFIG_ESP_HOSTED_HOST_CP_RESET_STRATEGY_ONLY_IF_NECESSARY=y
 
 # Throughput / buffering tuned for streaming PCM audio over WiFi.
 CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16

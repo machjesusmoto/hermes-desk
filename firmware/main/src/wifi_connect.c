@@ -85,19 +85,23 @@ esp_err_t wifi_connect_start(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    /* 2. Network stack + event loop — MUST come before esp_hosted_init()
+     *    because esp_hosted_connect_to_slave() triggers LWIP traffic on the
+     *    SDIO link. Without esp_netif_init() the tcpip thread doesn't exist
+     *    yet, causing: assert failed: tcpip_send_msg_wait_sem. */
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
     hermes_display_show_boot("Starting radio (C6)\u2026");
 
-    /* 2. esp_hosted: bring up the SDIO link to the C6 BEFORE touching WiFi.
-     *    The C6 is powered through a PI4IOE5V6408 pin that the BSP's
-     *    esp_hosted init enables (WLAN_PWR_EN on IOX 0x44 P0). */
-    ESP_LOGI(TAG, "bringing up esp_hosted (C6 over SDIO)\u2026");
-    esp_err_t err = esp_hosted_init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_hosted_init failed: %s", esp_err_to_name(err));
-        hermes_display_show_boot("C6 link failed");
-        return err;
-    }
-    err = esp_hosted_connect_to_slave();
+    /* 3. esp_hosted: The SDIO transport is auto-initialized during system
+     *    startup (eh_auto_init runs before app_main). The C6 is already
+     *    powered on and the SDIO link is already established. We just need
+     *    to complete the hosted handshake. Do NOT power-cycle the C6 or
+     *    re-init the transport — that causes an unrecoverable SDIO state. */
+    ESP_LOGI(TAG, "connecting to C6 via esp_hosted (auto-initialized)\u2026");
+    hermes_display_show_boot("Connecting to C6\u2026");
+    esp_err_t err = esp_hosted_connect_to_slave();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_hosted_connect_to_slave failed: %s", esp_err_to_name(err));
         hermes_display_show_boot("C6 slave not responding");
@@ -105,9 +109,7 @@ esp_err_t wifi_connect_start(void)
     }
     ESP_LOGI(TAG, "C6 link up");
 
-    /* 3. Network stack + event loop. */
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    /* 4. WiFi netif + event handlers. */
     esp_netif_create_default_wifi_sta();
 
     s_wifi_events = xEventGroupCreate();

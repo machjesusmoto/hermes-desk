@@ -1,44 +1,34 @@
-################################################################################
-# Hermes Desk Tab5 — menuconfig options
-#
-# Visible under "Hermes Desk Configuration" in `idf.py menuconfig`.
-# WiFi + bridge host can be set here at build time; runtime NVS provisioning
-# (MOT-81) will override WiFi creds at flash time later.
-################################################################################
-
 menu "Hermes Desk Configuration"
 
     config WIFI_SSID
         string "WiFi SSID"
-        default ""
+        default "motowireless50"
         help
-            SSID of the network the Tab5 should join (via the ESP32-C6).
-            Leave blank to require runtime NVS provisioning (MOT-81).
+            SSID of the WiFi network the Tab5 should join.
 
     config WIFI_PASS
         string "WiFi Password"
-        default ""
+        default "ownyourshitasshole"
         help
-            WPA2 passphrase for the above SSID.
+            WPA2 PSK for the WiFi network.
 
     config BRIDGE_HOST
-        string "Bridge host or IP"
-        default "192.168.1.50"
+        string "Bridge Host IP"
+        default "10.0.2.64"
         help
-            Hostname or IP of the Hermes Desk bridge service
-            (the bridge/hermes_bridge server, default port 8765).
+            IP address of the host running the Hermes Desk bridge service.
 
     config BRIDGE_PORT
-        int "Bridge WebSocket port"
+        int "Bridge Port"
         default 8765
         help
-            WebSocket port the bridge listens on (PROTOCOL.md default 8765).
+            WebSocket port of the bridge service.
 
     config BRIDGE_TOKEN
-        string "Bridge auth token"
+        string "Bridge Auth Token"
         default ""
         help
-            Token sent as ?token= on the WS URL. Leave blank if the bridge
-            runs without auth (server.token = "" in config.yaml).
+            Auth token for the bridge WebSocket endpoint. Leave empty if
+            the bridge is running without auth (LAN-only deployment).
 
 endmenu

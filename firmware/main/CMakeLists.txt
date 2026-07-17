@@ -13,6 +13,7 @@ idf_component_register(
         "hermes_ws"
         "hermes_audio"
         "hermes_display"
+        "esp_hosted"
     PRIV_REQUIRES
         "json"
 )
