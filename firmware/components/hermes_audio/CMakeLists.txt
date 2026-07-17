@@ -9,5 +9,7 @@ idf_component_register(
     REQUIRES
         m5stack_tab5
         esp_codec_dev
-        esp_log
+        log
+    PRIV_REQUIRES
+        main
 )

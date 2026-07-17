@@ -1,33 +1,12 @@
-## Hermes Desk Tab5 firmware — component manifest.
-##
-## These are pulled by `idf.py` into managed_components/ on the first build.
-## See docs/PROTOCOL.md for the wire protocol this firmware speaks.
-
 dependencies:
-  ## ESP-IDF core (P4 support landed in 5.4; developed against 5.5.x).
   idf:
     version: ">=5.4"
-
-  ## Official Espressif Board Support Package for the M5Stack Tab5.
-  ## Provides: MIPI-DSI 1280x720 panel + GT911 touch init, ES8388/ES7210
-  ## audio codec setup, PI4IOE5V6408 IO-expander handling, and LVGL glue.
   espressif/m5stack_tab5:
-    version: "~1.2"
-    override_path: ""
-
-  ## LVGL port — wraps the LVGL task + display/touch into one init call
-  ## (bsp_display_start_with_config / bsp_lvgl_port). Pulled in transitively
-  ## by the BSP, but we list it explicitly for the version pin.
+    version: "*"
   espressif/esp_lvgl_port:
-    version: "^2"
-
-  ## WebSocket client — used for the bridge connection (binary + text frames).
+    version: "*"
   espressif/esp_websocket_client:
-    version: "^1.2"
-
-  ## WiFi on the P4 has no built-in radio — it rides the ESP32-C6 co-processor
-  ## over SDIO. esp_hosted is the SDIO transport; esp_wifi_remote makes the C6
-  ## look like a normal esp_wifi stack to application code.
+    version: "*"
   espressif/esp_hosted:
     version: "*"
   espressif/esp_wifi_remote:

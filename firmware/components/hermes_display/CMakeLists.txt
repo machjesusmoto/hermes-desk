@@ -10,5 +10,5 @@ idf_component_register(
         m5stack_tab5
         esp_lvgl_port
         lvgl
-        esp_log
+        log
 )

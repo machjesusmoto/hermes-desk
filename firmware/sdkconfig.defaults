@@ -89,6 +89,15 @@ CONFIG_LV_COLOR_16_SWAP=y
 # Hand the draw buffers + tick to esp_lvgl_port; keep LVGL mem in PSRAM.
 CONFIG_LV_USE_PERF_MONITOR=y
 CONFIG_LV_MEM_CUSTOM=y
+# Montserrat fonts used by the display component (14=body, 20=boot, 24=status,
+# 28=transcript, 32=reply, 36=card title, 48=card icon).
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
 
 # --- Audio -------------------------------------------------------------------
 # ES8388 (speaker) + ES7210 (dual mic) via the BSP codec stack. We run the

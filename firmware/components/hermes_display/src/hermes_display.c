@@ -71,11 +71,11 @@ static disp_ctx_t s_d;
 /* The BSP exposes bsp_display_lock(timeout_ms)/bsp_display_unlock() which wrap
  * the LVGL port lock. We use a generous timeout because the LVGL task can be
  * busy flushing a 1280x720 frame. Pass 0 to wait indefinitely. */
-static bool lv_lock(uint32_t timeout_ms)
+static bool display_lock(uint32_t timeout_ms)
 {
     return bsp_display_lock(timeout_ms);
 }
-static void lv_unlock(void)
+static void display_unlock(void)
 {
     bsp_display_unlock();
 }
@@ -134,8 +134,8 @@ static void show_layout(hermes_layout_t l)
 /* ---- UI construction (runs once, on the LVGL task) ----------------------- */
 static void build_ui(void)
 {
-    lv_coord_t w = lv_display_get_hor_res(NULL);
-    lv_coord_t h = lv_display_get_ver_res(NULL);
+    lv_coord_t w = lv_disp_get_hor_res(NULL);
+    lv_coord_t h = lv_disp_get_ver_res(NULL);
 
     lv_style_init(&s_d.style_screen);
     lv_style_set_bg_color(&s_d.style_screen, COLOR_BG);
@@ -249,12 +249,12 @@ esp_err_t hermes_display_init(void)
     bsp_display_backlight_on();
 
     /* Take the display lock and build the UI on the LVGL task. */
-    if (!lv_lock(2000)) {
+    if (!display_lock(2000)) {
         ESP_LOGE(TAG, "LVGL lock timeout during init");
         return ESP_ERR_TIMEOUT;
     }
     build_ui();
-    lv_unlock();
+    display_unlock();
 
     ESP_LOGI(TAG, "display ready");
     return ESP_OK;
@@ -262,42 +262,42 @@ esp_err_t hermes_display_init(void)
 
 void hermes_display_set_state(hermes_disp_state_t state, const char *hint)
 {
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     /* Make sure the status layout is visible. */
     lv_label_set_text(s_d.status_state, state_label(state));
     lv_obj_set_style_text_color(s_d.status_state, state_color(state), 0);
     if (hint) lv_label_set_text(s_d.status_hint, hint);
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_set_transcript(const char *text)
 {
     if (!text) return;
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     lv_label_set_text(s_d.conv_transcript, text);
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_set_reply(const char *text)
 {
     if (!text) return;
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     lv_label_set_text(s_d.conv_reply, text);
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_clear_conversation(void)
 {
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     lv_label_set_text(s_d.conv_transcript, "");
     lv_label_set_text(s_d.conv_reply, "");
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_show_notification(const char *title, const char *body,
                                       const char *level)
 {
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     lv_color_t c = COLOR_INFO;
     const char *icon = "\xF0\x9F\x94\x94"; /* bell */
     if (level && strcmp(level, "warning") == 0)      { c = COLOR_WARN;   }
@@ -307,12 +307,12 @@ void hermes_display_show_notification(const char *title, const char *body,
     lv_obj_set_style_text_color(s_d.card_icon, c, 0);
     lv_label_set_text(s_d.card_title, title ? title : "Notification");
     lv_label_set_text(s_d.card_body, body ? body : "");
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_show_error(const char *code, const char *message)
 {
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     char buf[160];
     snprintf(buf, sizeof(buf), "%s%s%s",
              code ? code : "error",
@@ -321,24 +321,21 @@ void hermes_display_show_error(const char *code, const char *message)
     lv_label_set_text(s_d.status_state, "Error");
     lv_obj_set_style_text_color(s_d.status_state, COLOR_ERROR, 0);
     lv_label_set_text(s_d.status_hint, buf);
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_set_layout(hermes_layout_t layout)
 {
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     show_layout(layout);   /* pointer-based; robust to child ordering */
-    lv_unlock();
+    display_unlock();
 }
 
 void hermes_display_show_boot(const char *wifi_status)
 {
-    if (!lv_lock(500)) return;
+    if (!display_lock(500)) return;
     lv_label_set_text(s_d.status_state, "Starting\u2026");
     lv_obj_set_style_text_color(s_d.status_state, COLOR_MUTED, 0);
     lv_label_set_text(s_d.status_hint, wifi_status ? wifi_status : "");
-    lv_unlock();
-}
-xt(s_d.status_hint, wifi_status ? wifi_status : "");
-    lv_unlock();
+    display_unlock();
 }
