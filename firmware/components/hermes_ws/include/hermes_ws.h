@@ -56,6 +56,12 @@ typedef struct {
  */
 esp_err_t hermes_ws_start(const hermes_ws_config_t *cfg);
 
+/** Send the hello handshake (device -> bridge). Called on connect. */
+esp_err_t hermes_ws_send_hello(void);
+
+/** Task wrapper for sending hello — spawns, sends, self-deletes. */
+void hermes_ws_send_hello_task(void *arg);
+
 /** Stop and destroy the client. */
 esp_err_t hermes_ws_stop(void);
 

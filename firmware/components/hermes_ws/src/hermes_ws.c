@@ -67,18 +67,6 @@ static char *build_hello_json(void)
     return str;
 }
 
-static void send_hello(void)
-{
-    char *hello = build_hello_json();
-    if (hello) {
-        /* esp_websocket_client_send_text blocks until sent (or timeout). */
-        int sent = esp_websocket_client_send_text(s_ctx.client, hello,
-                                                  strlen(hello), 2000 / portTICK_PERIOD_MS);
-        ESP_LOGI(TAG, "hello sent (%d bytes) — device_id=%s", sent, s_ctx.device_id);
-        free(hello);
-    }
-}
-
 /* ---- websocket event handler --------------------------------------------- */
 static void ws_event_handler(void *arg, esp_event_base_t base,
                              int32_t id, void *data)
@@ -90,7 +78,8 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGI(TAG, "connected to ws://%s:%u%s", s_ctx.host, s_ctx.port, s_ctx.path);
         s_ctx.connected = true;
         if (s_ctx.flags) xEventGroupSetBits(s_ctx.flags, WS_CONN_BIT);
-        send_hello();
+        /* Don't send hello from inside the event handler — send_text blocks
+         * and can deadlock the WebSocket task. Signal the main task instead. */
         if (s_ctx.on_conn) s_ctx.on_conn(true);
         break;
 
@@ -102,7 +91,8 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
         break;
 
     case WEBSOCKET_EVENT_DATA: {
-        /* op_code: 1 = text, 2 = binary. (Opcode 0 = continuation.) */
+        /* op_code: 1 = text, 2 = binary, 9 = ping, 10 = pong. */
+        ESP_LOGD(TAG, "data event: op=%d len=%d", evt->op_code, evt->data_len);
         if (evt->op_code == 1 && evt->data_len > 0 && s_ctx.on_text) {
             /* Ensure NUL-termination for the parser. The client delivers a
              * full message in one event for our small control frames. */
@@ -132,6 +122,29 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
 }
 
 /* ---- public API ---------------------------------------------------------- */
+
+esp_err_t hermes_ws_send_hello(void)
+{
+    if (!s_ctx.client || !s_ctx.connected) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+    char *hello = build_hello_json();
+    if (!hello) return ESP_ERR_NO_MEM;
+    int sent = esp_websocket_client_send_text(s_ctx.client, hello,
+                                              strlen(hello), 2000 / portTICK_PERIOD_MS);
+    ESP_LOGI(TAG, "hello sent (%d bytes) — device_id=%s", sent, s_ctx.device_id);
+    free(hello);
+    return (sent > 0) ? ESP_OK : ESP_FAIL;
+}
+
+void hermes_ws_send_hello_task(void *arg)
+{
+    (void)arg;
+    /* Small delay to let the WebSocket event handler return before we send. */
+    vTaskDelay(pdMS_TO_TICKS(50));
+    hermes_ws_send_hello();
+    vTaskDelete(NULL);
+}
 
 esp_err_t hermes_ws_start(const hermes_ws_config_t *cfg)
 {
@@ -179,10 +192,11 @@ esp_err_t hermes_ws_start(const hermes_ws_config_t *cfg)
         .port = s_ctx.port,
         .transport = WEBSOCKET_TRANSPORT_OVER_TCP,
         .reconnect_timeout_ms = 3000,
-        .network_timeout_ms = 5000,
-        .buffer_size = 4096,          /* >= largest control JSON + PCM frame */
-        .task_stack = 8192,
+        .network_timeout_ms = 10000,
+        .buffer_size = 8192,          /* >= largest control JSON + PCM frame */
+        .task_stack = 12288,
         .skip_cert_common_name_check = true,
+        .ping_interval_sec = 5,       /* keepalive — bridge is silent in idle */
     };
 
     s_ctx.client = esp_websocket_client_init(&ws_cfg);

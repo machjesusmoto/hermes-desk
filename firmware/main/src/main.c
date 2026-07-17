@@ -24,6 +24,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "main";
@@ -116,7 +118,13 @@ static void on_ws_binary(const uint8_t *data, size_t len)
 
 static void on_ws_conn(bool connected)
 {
-    if (!connected) {
+    if (connected) {
+        /* Spawn a short-lived task to send hello. The WebSocket event handler
+         * task can't call send_text — it deadlocks waiting for the send queue
+         * while the event task is blocked. */
+        xTaskCreate((void (*)(void *))hermes_ws_send_hello_task,
+                    "ws_hello", 4096, NULL, 5, NULL);
+    } else {
         app_state_handle_event(APP_EVT_BRIDGE_DISCONNECT);
     }
 }
