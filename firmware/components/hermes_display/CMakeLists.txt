@@ -9,6 +9,9 @@ idf_component_register(
     REQUIRES
         m5stack_tab5
         esp_lvgl_port
+        esp_lcd_touch
+        esp_lcd
+        esp_driver_i2c
         lvgl
         log
         main

@@ -25,9 +25,59 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "esp_lcd_touch.h"
+#include "esp_lcd_panel_io.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/i2c_master.h"
 #include "bsp/m5stack_tab5.h"
 
 static const char *TAG = "hermes_display";
+
+/* ---- touch diagnostic (remove after debugging) ---- */
+
+void touch_diag_task(void *arg)
+{
+    esp_lcd_touch_handle_t tp_h = *(esp_lcd_touch_handle_t *)arg;
+    ESP_LOGI("touch_diag", "diagnostic task started, tp=%p", (void *)tp_h);
+
+    /* I2C bus scan: check which devices respond */
+    i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
+    for (int addr = 0x08; addr < 0x78; addr++) {
+        uint8_t dummy = 0;
+        esp_err_t probe = i2c_master_probe(bus, addr, 50);
+        if (probe == ESP_OK) {
+            ESP_LOGI("touch_diag", "I2C device found at 0x%02x", addr);
+        }
+    }
+
+    /* Wait 2 seconds for the touch controller to fully initialize */
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    /* Read a range of registers to understand the map */
+    for (int reg = 0x0000; reg <= 0x0020; reg++) {
+        uint8_t val = 0;
+        esp_err_t r = esp_lcd_panel_io_rx_param(tp_h->io, reg, &val, 1);
+        if (r == ESP_OK && val != 0) {
+            ESP_LOGI("touch_diag", "reg[0x%04x]=0x%02x", reg, val);
+        }
+    }
+
+    for (int i = 0; i < 200; i++) {
+        uint8_t adv = 0;
+        uint8_t coord[8] = {0};
+        esp_lcd_panel_io_rx_param(tp_h->io, 0x0010, &adv, 1);
+        esp_lcd_panel_io_rx_param(tp_h->io, 0x0014, coord, 8);
+        if (adv != 0 || coord[0] != 0 || coord[1] != 0) {
+            ESP_LOGI("touch_diag", "[%d] adv=0x%02x coord=%02x%02x%02x%02x%02x%02x%02x%02x",
+                     i, adv, coord[0], coord[1], coord[2], coord[3],
+                     coord[4], coord[5], coord[6], coord[7]);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    ESP_LOGI("touch_diag", "diagnostic task done (20s total, no touch detected)");
+    vTaskDelete(NULL);
+}
 
 /* ---- theme --------------------------------------------------------------- */
 #define COLOR_BG        lv_color_hex(0x0E1116)
@@ -250,13 +300,26 @@ esp_err_t hermes_display_init(void)
 
     /* The BSP registers the ST7123 touch in interrupt mode (GPIO 23).
      * If the interrupt doesn't fire, LVGL never reads touch data.
-     * Switch to polling mode so LVGL reads touch on every timer tick. */
+     * Switch to polling mode so LVGL reads touch on every timer tick.
+     * Also wake the touch controller from sleep — the ST7123 defaults
+     * to sleep mode and the BSP doesn't call exit_sleep. */
     lv_indev_t *indev = bsp_display_get_input_dev();
-    ESP_LOGI(TAG, "touch indev pointer: %p", (void *)indev);
     if (indev) {
-        ESP_LOGI(TAG, "touch indev type: %d, mode: %d", lv_indev_get_type(indev), lv_indev_get_mode(indev));
         lv_indev_set_mode(indev, LV_INDEV_MODE_TIMER);
         ESP_LOGI(TAG, "touch input device switched to polling mode");
+
+        /* Diagnostic: periodically read touch registers to see if data
+         * appears when the screen is touched. Remove after debugging. */
+        void *ctx = lv_indev_get_driver_data(indev);
+        if (ctx) {
+            esp_lcd_touch_handle_t tp_h = *(esp_lcd_touch_handle_t *)ctx;
+            ESP_LOGI(TAG, "touch handle for diag: %p", (void *)tp_h);
+            /* Store handle globally for the diagnostic task */
+            static esp_lcd_touch_handle_t s_diag_tp;
+            s_diag_tp = tp_h;
+            extern void touch_diag_task(void *);
+            xTaskCreate(touch_diag_task, "touch_diag", 4096, &s_diag_tp, 5, NULL);
+        }
     } else {
         ESP_LOGW(TAG, "no touch input device found — touch will not work");
     }
