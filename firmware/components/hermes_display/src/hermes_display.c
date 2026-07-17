@@ -248,6 +248,19 @@ esp_err_t hermes_display_init(void)
     bsp_display_start();
     bsp_display_backlight_on();
 
+    /* The BSP registers the ST7123 touch in interrupt mode (GPIO 23).
+     * If the interrupt doesn't fire, LVGL never reads touch data.
+     * Switch to polling mode so LVGL reads touch on every timer tick. */
+    lv_indev_t *indev = bsp_display_get_input_dev();
+    ESP_LOGI(TAG, "touch indev pointer: %p", (void *)indev);
+    if (indev) {
+        ESP_LOGI(TAG, "touch indev type: %d, mode: %d", lv_indev_get_type(indev), lv_indev_get_mode(indev));
+        lv_indev_set_mode(indev, LV_INDEV_MODE_TIMER);
+        ESP_LOGI(TAG, "touch input device switched to polling mode");
+    } else {
+        ESP_LOGW(TAG, "no touch input device found — touch will not work");
+    }
+
     /* Take the display lock and build the UI on the LVGL task. */
     if (!display_lock(2000)) {
         ESP_LOGE(TAG, "LVGL lock timeout during init");
@@ -340,6 +353,7 @@ void hermes_display_set_layout(hermes_layout_t layout)
 static void touch_ptt_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
+    ESP_LOGI("touch_ptt", "touch event: %s", code == LV_EVENT_PRESSED ? "PRESSED" : code == LV_EVENT_RELEASED ? "RELEASED" : "other");
     if (code == LV_EVENT_PRESSED) {
         app_state_handle_event(APP_EVT_PTT_PRESS);
     } else if (code == LV_EVENT_RELEASED) {
@@ -353,14 +367,28 @@ void hermes_display_register_touch_ptt(void)
         ESP_LOGE(TAG, "LVGL lock timeout during touch_ptt register");
         return;
     }
-    /* Attach to the screen object so the entire touchscreen is a PTT surface. */
-    lv_obj_add_event_cb(s_d.screen, touch_ptt_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(s_d.screen, touch_ptt_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_clear_flag(s_d.screen, LV_OBJ_FLAG_SCROLLABLE);
-    /* Make the screen clickable. */
-    lv_obj_add_flag(s_d.screen, LV_OBJ_FLAG_CLICKABLE);
+    /* Attach to all layout containers — each covers the full screen and sits
+     * on top of s_d.screen. In LVGL 9, touch events go to the topmost
+     * clickable object, so the screen itself never receives them if a child
+     * covers it. We attach to all three so touch works regardless of which
+     * layout is active. */
+    if (s_d.status_cont) {
+        lv_obj_add_event_cb(s_d.status_cont, touch_ptt_cb, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(s_d.status_cont, touch_ptt_cb, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_flag(s_d.status_cont, LV_OBJ_FLAG_CLICKABLE);
+    }
+    if (s_d.conv_cont) {
+        lv_obj_add_event_cb(s_d.conv_cont, touch_ptt_cb, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(s_d.conv_cont, touch_ptt_cb, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_flag(s_d.conv_cont, LV_OBJ_FLAG_CLICKABLE);
+    }
+    if (s_d.card_cont) {
+        lv_obj_add_event_cb(s_d.card_cont, touch_ptt_cb, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(s_d.card_cont, touch_ptt_cb, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_flag(s_d.card_cont, LV_OBJ_FLAG_CLICKABLE);
+    }
     display_unlock();
-    ESP_LOGI(TAG, "touch-to-talk registered on screen");
+    ESP_LOGI(TAG, "touch-to-talk registered on all layout containers");
 }
 
 void hermes_display_show_boot(const char *wifi_status)
