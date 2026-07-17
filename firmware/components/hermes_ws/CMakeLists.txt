@@ -15,4 +15,5 @@ idf_component_register(
         nvs_flash
     PRIV_REQUIRES
         main
+        json
 )

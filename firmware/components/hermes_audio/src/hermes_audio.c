@@ -14,8 +14,8 @@
  * and writes it to I2S TX, double-buffered through a ring buffer so the WS
  * task and the I2S DMA task stay decoupled.
  *
- * Codec API notes (esp_codec_dev ~1.5, the BSP-pinned version):
- *   esp_codec_dev_open(handle, FS, BITS, CHANNELS, volume) sets the format;
+ * Codec API notes (esp_codec_dev ~1.5+, the BSP-pinned version):
+ *   esp_codec_dev_open(handle, &esp_codec_dev_sample_info_t) sets the format;
  *   esp_codec_dev_read/write() are blocking PCM I/O against the I2S DMA.
  *   blocking PCM I/O against the I2S DMA. The mic returns stereo frames from
  *   the ES7210's two channels; we down-mix to mono by averaging L+R so the
@@ -173,13 +173,21 @@ esp_err_t hermes_audio_init(void)
     }
 
     /* Open both codecs at the bridge's native format. esp_codec_dev_open
-     * signature (v1.x): (handle, sample_rate, bit_resolution, channel).
+     * signature (v1.5+): (handle, &esp_codec_dev_sample_info_t).
      * Volume/gain are set separately. The ES7210 reports 2 channels (dual
      * mic); we down-mix to mono in the capture task before sending. */
-    esp_err_t e1 = esp_codec_dev_open(s_a.spk, HERMES_AUDIO_SAMPLE_RATE,
-                                      HERMES_AUDIO_BITS, 2 /* stereo DAC path */);
-    esp_err_t e2 = esp_codec_dev_open(s_a.mic, HERMES_AUDIO_SAMPLE_RATE,
-                                      HERMES_AUDIO_BITS, 2 /* dual-mic ADC */);
+    esp_codec_dev_sample_info_t spk_fs = {
+        .sample_rate     = HERMES_AUDIO_SAMPLE_RATE,
+        .channel         = 2,  /* stereo DAC path */
+        .bits_per_sample = HERMES_AUDIO_BITS,
+    };
+    esp_codec_dev_sample_info_t mic_fs = {
+        .sample_rate     = HERMES_AUDIO_SAMPLE_RATE,
+        .channel         = 2,  /* dual-mic ADC */
+        .bits_per_sample = HERMES_AUDIO_BITS,
+    };
+    esp_err_t e1 = esp_codec_dev_open(s_a.spk, &spk_fs);
+    esp_err_t e2 = esp_codec_dev_open(s_a.mic, &mic_fs);
     if (e1 != ESP_OK || e2 != ESP_OK) {
         ESP_LOGE(TAG, "codec open failed: spk=%s mic=%s",
                  esp_err_to_name(e1), esp_err_to_name(e2));

@@ -27,7 +27,7 @@
 #include "sdkconfig.h"
 
 /* esp_hosted transport to the C6 co-processor. */
-#include "esp_hosted_api.h"
+#include "esp_hosted.h"
 
 static const char *TAG = "wifi";
 

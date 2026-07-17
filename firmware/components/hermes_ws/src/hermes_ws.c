@@ -23,6 +23,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
 #include "esp_websocket_client.h"
 #include "cJSON.h"
 
@@ -123,10 +124,6 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGE(TAG, "websocket error");
         break;
 
-    case WEBSOCKET_EVENT_DATA_FIN:
-        /* Optional fine-grained event; nothing to do. */
-        break;
-
     default:
         break;
     }
@@ -161,7 +158,7 @@ esp_err_t hermes_ws_start(const hermes_ws_config_t *cfg)
      * esp_wifi_start(), so resolve it lazily at hello-send time (which runs
      * post-connect). If unavailable, fall back to a static tag. */
     uint8_t mac[6] = {0};
-    if (esp_wifi_get_mac(ESP_IF_WIFI_STA, mac) == ESP_OK &&
+    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK &&
         (mac[0] || mac[1] || mac[2] || mac[3] || mac[4] || mac[5])) {
         snprintf(s_ctx.device_id, sizeof(s_ctx.device_id), "tab5-%02x%02x%02x",
                  mac[3], mac[4], mac[5]);
@@ -173,7 +170,7 @@ esp_err_t hermes_ws_start(const hermes_ws_config_t *cfg)
 
     /* Build the URI. Use ws:// (plain) — the bridge listens on 8765 plain.
      * Switch to wss:// + cert bundle if the bridge ever fronts TLS. */
-    char uri[160];
+    char uri[256];
     snprintf(uri, sizeof(uri), "ws://%s:%u%s", s_ctx.host, s_ctx.port, s_ctx.path);
 
     esp_websocket_client_config_t ws_cfg = {
@@ -184,7 +181,6 @@ esp_err_t hermes_ws_start(const hermes_ws_config_t *cfg)
         .reconnect_timeout_ms = 3000,
         .network_timeout_ms = 5000,
         .buffer_size = 4096,          /* >= largest control JSON + PCM frame */
-        .buffer_overflow_handle = NULL,
         .task_stack = 8192,
         .skip_cert_common_name_check = true,
     };
