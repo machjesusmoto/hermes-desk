@@ -47,6 +47,7 @@ extern "C" {
 #define HERMES_TYPE_STATUS  "status"
 #define HERMES_TYPE_ERROR   "error"
 #define HERMES_TYPE_NOTIFY  "notify"
+#define HERMES_TYPE_NOTIFY_ACK "notify_ack"   /* device -> bridge: ack/dismiss */
 
 /* Sub-values for action / state fields. */
 #define HERMES_ACTION_START "start"
@@ -63,10 +64,21 @@ extern "C" {
 #define HERMES_ERR_GATEWAY_TIMEOUT "gateway_timeout"
 #define HERMES_ERR_BAD_MESSAGE     "bad_message"
 
-/* Notification levels (bridge -> device `notify.level`). */
+/* Notification levels (bridge -> device `notify.level`). The bridge uses the
+ * set {info, warning, error, success}; "urgent" is accepted as an alias for
+ * the error styling so older payloads still render. */
 #define HERMES_LEVEL_INFO    "info"
 #define HERMES_LEVEL_WARNING "warning"
-#define HERMES_LEVEL_URGENT  "urgent"
+#define HERMES_LEVEL_ERROR   "error"
+#define HERMES_LEVEL_SUCCESS "success"
+#define HERMES_LEVEL_URGENT  "urgent"   /* legacy alias -> error styling */
+
+/* Notification priority (bridge -> device `notify.priority`, 0..3).
+ * HIGH(2)/URGENT(3) are followed by a TTS announcement stream. */
+#define HERMES_PRIO_LOW      0
+#define HERMES_PRIO_NORMAL   1
+#define HERMES_PRIO_HIGH     2
+#define HERMES_PRIO_URGENT   3
 
 #ifdef __cplusplus
 }

@@ -12,8 +12,11 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
 
+from typing import Optional
+
 from .config import BridgeConfig
 from . import protocol as p
+from .audio import chunk_pcm
 from .stt import STTClient
 from .tts import TTSClient
 from .gateway import GatewayClient
@@ -22,6 +25,21 @@ from .session import Session, SessionRegistry
 from .notification import Notification, NotificationQueue, Priority, QuietHours
 
 log = logging.getLogger(__name__)
+
+
+def _announcement_text(notif: Notification) -> str:
+    """Build a short spoken announcement for a high-priority notification.
+
+    Concise and voice-friendly: leads with an urgency cue, then the title.
+    The body is included only if it is short enough to read aloud once.
+    """
+    prefix = "Heads up." if notif.priority >= Priority.URGENT else "Notification."
+    text = f"{prefix} {notif.title}."
+    body = (notif.body or "").strip()
+    # Keep the spoken cue short — long bodies stay on-screen only.
+    if body and len(body) <= 120:
+        text += f" {body}"
+    return text
 
 
 class BridgeState:
@@ -59,6 +77,70 @@ class BridgeState:
         )
         self.pipeline = Pipeline(self.stt, self.tts, self.gateway, cfg.audio)
         self.registry = SessionRegistry()
+
+    async def deliver_notification(self, notif: Notification,
+                                   session: Optional[Session] = None) -> bool:
+        """Push a notification to a connected Tab5.
+
+        Sends the notify control frame, and — for HIGH/URGENT notifications —
+        follows it with a short TTS announcement streamed as PCM (the same
+        framing the voice pipeline uses: tts start -> PCM chunks -> tts stop).
+        Marks the notification delivered in the queue and returns True on
+        success. Failures (no session, send error) are logged and returned as
+        False; they are not raised so /notify stays best-effort.
+        """
+        from . import protocol as p
+
+        if session is None:
+            session = await self.registry.any_session()
+        if session is None:
+            log.info("notify %s: no device connected — queued only", notif.id)
+            return False
+
+        # 1. Notify control frame (always; drives the on-screen card).
+        try:
+            await session.connection.send_text(p.notify_out(
+                title=notif.title, body=notif.body, level=notif.level,
+                notification_id=notif.id, priority=int(notif.priority),
+                requires_ack=notif.requires_ack, category=notif.category,
+                display_type=notif.display_type,
+            ))
+        except Exception as exc:
+            log.warning("notify %s: control frame failed: %s", notif.id, exc)
+            return False
+
+        self.notifications.delivered(notif)
+
+        # 2. Audio cue for high-priority notifications (task 4).
+        if notif.priority >= Priority.HIGH:
+            await self._announce(notif, session.connection)
+        return True
+
+    async def _announce(self, notif: Notification, writer) -> None:
+        """Synthesize + stream a short TTS announcement for a high-prio notif.
+
+        Mirrors Pipeline.run_turn's TTS streaming so the firmware audio path is
+        identical to a voice reply: tts start -> 20 ms PCM chunks -> tts stop.
+        Failures are logged and swallowed — the on-screen card already showed.
+        """
+        from . import protocol as p
+
+        text = _announcement_text(notif)
+        try:
+            pcm = await self.tts.synthesize(text)
+        except Exception as exc:
+            log.warning("notify %s: TTS cue failed: %s", notif.id, exc)
+            return
+        try:
+            await writer.send_text(p.tts_start_out(
+                sample_rate=self.cfg.audio.sample_rate))
+            for chunk in chunk_pcm(pcm, self.cfg.audio.frame_bytes):
+                await writer.send_bytes(chunk)
+            await writer.send_text(p.tts_stop_out())
+            log.info("notify %s: announced %d bytes PCM (%r)",
+                     notif.id, len(pcm), text[:60])
+        except Exception as exc:
+            log.warning("notify %s: announcement stream failed: %s", notif.id, exc)
 
 
 @asynccontextmanager
@@ -110,21 +192,12 @@ def create_app(cfg: BridgeConfig) -> FastAPI:
                 {"status": "suppressed", "reason": "quiet_hours"},
                 status_code=status.HTTP_202_ACCEPTED,
             )
-        # Try immediate delivery if a device is connected
-        session = await bridge.registry.any_session()
-        if session:
-            try:
-                await session.connection.send_text(p.notify_out(
-                    title=notif.title, body=notif.body, level=notif.level,
-                    notification_id=notif.id, priority=int(notif.priority),
-                    requires_ack=notif.requires_ack, category=notif.category,
-                    display_type=notif.display_type,
-                ))
-                bridge.notifications.delivered(notif)
-            except Exception as exc:
-                log.warning("immediate notify delivery failed: %s", exc)
+        # Try immediate delivery if a device is connected. High/urgent
+        # notifications also get a short TTS announcement (see deliver_notification).
+        delivered = await bridge.deliver_notification(notif)
+        status_msg = "delivered" if delivered else "queued"
         return JSONResponse(
-            {"status": "queued", "notification_id": notif.id},
+            {"status": status_msg, "notification_id": notif.id},
             status_code=status.HTTP_202_ACCEPTED,
         )
 

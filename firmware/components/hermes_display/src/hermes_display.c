@@ -66,9 +66,13 @@ typedef struct {
     lv_obj_t       *card_icon;
     lv_obj_t       *card_title;
     lv_obj_t       *card_body;
+    lv_obj_t       *card_dismiss;     /* Dismiss button (notify ack) */
     lv_obj_t       *boot_status;     /* top-left boot status line */
     hermes_layout_t layout;
     lv_style_t      style_screen;
+    /* notification dismiss handling */
+    hermes_dismiss_cb_t dismiss_cb;
+    char            active_notif_id[40];  /* id of the card currently shown */
 } disp_ctx_t;
 
 static disp_ctx_t s_d;
@@ -136,6 +140,11 @@ static void show_layout(hermes_layout_t l)
     }
     s_d.layout = l;
 }
+
+/* ---- notification dismiss ------------------------------------------------- */
+/* Forward decl: defined below in the public API section, but referenced by
+ * build_ui (the Dismiss button event handler is wired during UI construction). */
+static void dismiss_btn_cb(lv_event_t *e);
 
 /* ---- UI construction (runs once, on the LVGL task) ----------------------- */
 static void build_ui(void)
@@ -229,6 +238,22 @@ static void build_ui(void)
     lv_obj_set_style_text_color(s_d.card_body, COLOR_MUTED, 0);
     lv_obj_set_style_pad_top(s_d.card_body, 16, 0);
 
+    /* Dismiss button — sends notify_ack for the active notification and
+     * returns to the status layout. Hidden until a notification is shown. */
+    s_d.card_dismiss = lv_btn_create(s_d.card_cont);
+    lv_obj_set_size(s_d.card_dismiss, 240, 64);
+    lv_obj_set_style_pad_top(s_d.card_dismiss, 28, 0);
+    lv_obj_set_style_radius(s_d.card_dismiss, 16, 0);
+    lv_obj_set_style_bg_color(s_d.card_dismiss, COLOR_PANEL, 0);
+    lv_obj_set_style_border_color(s_d.card_dismiss, COLOR_MUTED, 0);
+    lv_obj_set_style_border_width(s_d.card_dismiss, 2, 0);
+    lv_obj_add_event_cb(s_d.card_dismiss, dismiss_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *dismiss_lbl = lv_label_create(s_d.card_dismiss);
+    lv_obj_set_style_text_font(dismiss_lbl, &lv_font_montserrat_24, 0);
+    lv_label_set_text(dismiss_lbl, "Dismiss");
+    lv_obj_center(dismiss_lbl);
+    lv_obj_add_flag(s_d.card_dismiss, LV_OBJ_FLAG_HIDDEN);
+
     /* ---- Boot overlay (top-left WiFi status) ---- */
     s_d.boot_status = lv_label_create(s_d.screen);
     lv_obj_set_style_text_font(s_d.boot_status, &lv_font_montserrat_20, 0);
@@ -311,19 +336,74 @@ void hermes_display_clear_conversation(void)
     display_unlock();
 }
 
+void hermes_display_set_dismiss_cb(hermes_dismiss_cb_t cb)
+{
+    /* No LVGL lock needed — only writes a function pointer that the LVGL
+     * task reads under the lock when the button is pressed. */
+    s_d.dismiss_cb = cb;
+}
+
+static void dismiss_btn_cb(lv_event_t *e)
+{
+    (void)e;
+    /* Run on the LVGL task (button event). Send the ack, then return to the
+     * status layout and hide the dismiss button. The active_notif_id is
+     * captured under the lock in show_notification. */
+    const char *nid = s_d.active_notif_id[0] ? s_d.active_notif_id : NULL;
+    if (nid && s_d.dismiss_cb) {
+        s_d.dismiss_cb(nid);
+    }
+    s_d.active_notif_id[0] = '\0';
+    if (s_d.card_dismiss) lv_obj_add_flag(s_d.card_dismiss, LV_OBJ_FLAG_HIDDEN);
+    show_layout(HERMES_LAYOUT_STATUS);
+    ESP_LOGI(TAG, "notification dismissed");
+}
+
 void hermes_display_show_notification(const char *title, const char *body,
-                                      const char *level)
+                                      const char *level,
+                                      const char *notification_id,
+                                      int priority)
 {
     if (!display_lock(500)) return;
     lv_color_t c = COLOR_INFO;
     const char *icon = "\xF0\x9F\x94\x94"; /* bell */
-    if (level && strcmp(level, "warning") == 0)      { c = COLOR_WARN;   }
-    else if (level && strcmp(level, "urgent") == 0)  { c = COLOR_URGENT; icon = "\xE2\x9A\xA0\xEF\xB8\x8F"; }
+
+    /* Map the bridge's level set {info, warning, error, success} to colors.
+     * "urgent" is a legacy alias that maps to the error/urgent styling. */
+    if (level) {
+        if (strcmp(level, HERMES_LEVEL_WARNING) == 0) {
+            c = COLOR_WARN; icon = "\xE2\x9A\xA0\xEF\xB8\x8F";
+        } else if (strcmp(level, HERMES_LEVEL_ERROR) == 0 ||
+                   strcmp(level, HERMES_LEVEL_URGENT) == 0) {
+            c = COLOR_URGENT; icon = "\xE2\x9A\xA0\xEF\xB8\x8F";
+        } else if (strcmp(level, HERMES_LEVEL_SUCCESS) == 0) {
+            c = COLOR_SPEAK; icon = "\xE2\x9C\x85";  /* check mark */
+        }
+        /* "info" and anything unknown fall through to the cyan bell default */
+    }
+
+    /* Capture the notification id so the dismiss button can ack it. */
+    if (notification_id && notification_id[0]) {
+        strncpy(s_d.active_notif_id, notification_id,
+                sizeof(s_d.active_notif_id) - 1);
+        s_d.active_notif_id[sizeof(s_d.active_notif_id) - 1] = '\0';
+    } else {
+        s_d.active_notif_id[0] = '\0';
+    }
 
     lv_label_set_text(s_d.card_icon, icon);
     lv_obj_set_style_text_color(s_d.card_icon, c, 0);
     lv_label_set_text(s_d.card_title, title ? title : "Notification");
     lv_label_set_text(s_d.card_body, body ? body : "");
+
+    /* Switch to the card layout and reveal the dismiss button. HIGH/URGENT
+     * cards persist until dismissed; NORMAL/LOW also show the button so the
+     * user can clear the card (the bridge does not require ack for them). */
+    show_layout(HERMES_LAYOUT_STATUS_CARD);
+    if (s_d.card_dismiss) {
+        lv_obj_clear_flag(s_d.card_dismiss, LV_OBJ_FLAG_HIDDEN);
+    }
+    (void)priority;  /* styling already applied via level; reserved for M3 */
     display_unlock();
 }
 

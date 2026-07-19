@@ -21,6 +21,7 @@
 #include "app_state.h"
 
 #include <string.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "esp_system.h"
 #include "cJSON.h"
@@ -29,6 +30,20 @@
 #include "sdkconfig.h"
 
 static const char *TAG = "main";
+
+/* Dismiss-button callback: forward to the bridge as a notify_ack. Registered
+ * on the display so the notification card's Dismiss button acks the active
+ * notification id and the bridge stops awaiting ack. */
+static void on_notification_dismiss(const char *notification_id)
+{
+    if (!notification_id || !notification_id[0]) {
+        ESP_LOGW(TAG, "dismiss pressed but no notification id — not acking");
+        return;
+    }
+    esp_err_t r = hermes_ws_send_notify_ack(notification_id);
+    ESP_LOGI(TAG, "dismiss -> notify_ack(%s): %s",
+             notification_id, esp_err_to_name(r));
+}
 
 /* Bridge connection config (from Kconfig.projbuild / menuconfig). */
 #ifndef CONFIG_BRIDGE_HOST
@@ -92,14 +107,40 @@ static void on_ws_text(const char *json, size_t len)
         app_state_on_error(code, msg);
 
     } else if (strcmp(type, HERMES_TYPE_NOTIFY) == 0) {
-        cJSON *jt = cJSON_GetObjectItemCaseSensitive(root, "title");
-        cJSON *jb = cJSON_GetObjectItemCaseSensitive(root, "body");
-        cJSON *jl = cJSON_GetObjectItemCaseSensitive(root, "level");
+        cJSON *jt   = cJSON_GetObjectItemCaseSensitive(root, "title");
+        cJSON *jb   = cJSON_GetObjectItemCaseSensitive(root, "body");
+        cJSON *jl   = cJSON_GetObjectItemCaseSensitive(root, "level");
+        cJSON *jid  = cJSON_GetObjectItemCaseSensitive(root, "notification_id");
+        cJSON *jp   = cJSON_GetObjectItemCaseSensitive(root, "priority");
+        cJSON *jack = cJSON_GetObjectItemCaseSensitive(root, "requires_ack");
         const char *title = (jt && cJSON_IsString(jt)) ? jt->valuestring : "Notification";
         const char *body  = (jb && cJSON_IsString(jb)) ? jb->valuestring : "";
-        const char *level = (jl && cJSON_IsString(jl)) ? jl->valuestring : "info";
-        ESP_LOGI(TAG, "notify: %s / %s / %s", title, body, level);
-        hermes_display_show_notification(title, body, level);
+        const char *level = (jl && cJSON_IsString(jl)) ? jl->valuestring : HERMES_LEVEL_INFO;
+        const char *nid   = (jid && cJSON_IsString(jid)) ? jid->valuestring : "";
+        int priority      = (jp && cJSON_IsNumber(jp)) ? jp->valueint : HERMES_PRIO_NORMAL;
+        bool needs_ack    = (jack && cJSON_IsTrue(jack)) ? true : false;
+        ESP_LOGI(TAG, "notify: %s / %s / %s prio=%d ack=%d id=%s",
+                 title, body, level, priority, needs_ack, nid);
+
+        /* Show the card (with dismiss button). The dismiss callback sends
+         * notify_ack back to the bridge for this notification id. */
+        hermes_display_show_notification(title, body, level, nid, priority);
+
+        /* High/urgent notifications are followed by a TTS announcement
+         * stream (see bridge deliver_notification). Prime the playback path
+         * so the inbound PCM flows to the speaker without a cold-start gap.
+         * The bridge sends tts start -> PCM -> tts stop around it, and the
+         * audio component idles again on tts stop (handled in app_state). */
+        if (priority >= HERMES_PRIO_HIGH) {
+            hermes_audio_playback_start();
+        }
+
+    } else if (strcmp(type, HERMES_TYPE_NOTIFY_ACK) == 0) {
+        /* Bridge -> device ack confirmation (response to our notify_ack).
+         * No display action; logged for diagnostics. */
+        cJSON *jid = cJSON_GetObjectItemCaseSensitive(root, "notification_id");
+        const char *nid = (jid && cJSON_IsString(jid)) ? jid->valuestring : "?";
+        ESP_LOGI(TAG, "bridge confirmed ack: %s", nid);
 
     } else {
         ESP_LOGW(TAG, "unknown bridge message type: %s", type);
@@ -137,6 +178,9 @@ void app_main(void)
     /* 1. Display first so we can show boot progress. */
     ESP_ERROR_CHECK(hermes_display_init());
     hermes_display_show_boot("Booting\u2026");
+
+    /* Wire the notification Dismiss button -> notify_ack to the bridge. */
+    hermes_display_set_dismiss_cb(on_notification_dismiss);
 
     /* 2. WiFi (esp_hosted -> C6 -> esp_wifi). Blocks until IP. */
     esp_err_t net = wifi_connect_start();

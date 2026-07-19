@@ -23,8 +23,15 @@ class FakeSTT:
 
 
 class FakeTTS:
+    """Records every synthesized string so tests can assert on audio cues."""
+    def __init__(self):
+        self.calls: list[str] = []
+        self.pcm = pcm_to_wav(b"\x00" * 1280)  # 2 frames of silence, WAV-wrapped
     async def synthesize(self, text):
-        return b"\x00" * 640  # 1 frame of silence
+        self.calls.append(text)
+        # Return raw PCM (the real client strips the WAV header); exercise both
+        # shapes by returning a fixed PCM blob the bridge can chunk.
+        return b"\x00" * 1280
     async def aclose(self):
         pass
 
@@ -220,3 +227,164 @@ def test_notify_with_device():
         assert msg["type"] == "notify"
         assert msg["title"] == "Meeting"
         assert msg["level"] == "urgent"
+
+
+def _connect(client):
+    ws = client.websocket_connect("/ws").__enter__()
+    ws.send_text(_hello())
+    ws.receive_text()  # hello
+    ws.receive_text()  # status: idle
+    return ws
+
+
+def _drain_notify(ws):
+    """Read the notify frame and any TTS framing that follows it."""
+    msg = json.loads(ws.receive_text())
+    assert msg["type"] == "notify"
+    return msg
+
+
+def _drain_until(ws, want_type: str, want_action: str | None = None):
+    """Read mixed text/binary frames until a JSON frame of the given type.
+
+    The Starlette WS test session surfaces text and binary frames through the
+    same receive() stream, so when the bridge interleaves PCM chunks between
+    tts start/stop we must skip the binary frames to reach the next text one.
+    Returns the matching JSON dict; raises on unexpected close.
+    """
+    while True:
+        msg = ws.receive()
+        if "text" in msg:
+            data = json.loads(msg["text"])
+            if data.get("type") == want_type and (
+                    want_action is None or data.get("action") == want_action):
+                return data
+        # binary PCM chunks are skipped
+
+
+def _collect_pcm(ws, until_action: str = "stop") -> bytes:
+    """Collect binary PCM until the matching tts action frame arrives."""
+    out = bytearray()
+    while True:
+        msg = ws.receive()
+        if "bytes" in msg:
+            out += msg["bytes"]
+        elif "text" in msg:
+            data = json.loads(msg["text"])
+            if data.get("type") == "tts" and data.get("action") == until_action:
+                return bytes(out)
+
+
+def test_notify_high_priority_triggers_tts_announcement():
+    """Task 4: HIGH/URGENT notifications get a spoken cue streamed as PCM."""
+    app = _make_app()
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(_hello())
+        ws.receive_text()  # hello
+        ws.receive_text()  # status: idle
+
+        r = client.post("/notify", json={
+            "title": "Deploy failed", "body": "prod rollback",
+            "priority": 3,  # URGENT
+        })
+        assert r.status_code == 202
+        assert r.json()["status"] == "delivered"
+
+        # 1. notify control frame
+        notify = json.loads(ws.receive_text())
+        assert notify["type"] == "notify"
+        assert notify["priority"] == 3
+        assert notify["notification_id"]  # bridge assigns an id
+
+        # 2. tts start
+        tts_start = _drain_until(ws, "tts", "start")
+        assert tts_start["type"] == "tts"
+        assert tts_start["action"] == "start"
+
+        # 3. one or more binary PCM chunks (announcement audio)
+        pcm = _collect_pcm(ws, until_action="stop")
+        assert len(pcm) > 0
+
+        # 4. tts stop already consumed by _collect_pcm; verify it was sent by
+        #    confirming the synthesized announcement mentions the title.
+        tts = app.state.bridge.tts
+        assert len(tts.calls) == 1
+        assert "Deploy failed" in tts.calls[0]
+
+
+def test_notify_normal_priority_no_tts_announcement():
+    """NORMAL/LOW notifications show the card only — no spoken cue."""
+    app = _make_app()
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(_hello())
+        ws.receive_text()  # hello
+        ws.receive_text()  # status: idle
+
+        r = client.post("/notify", json={
+            "title": "Build passed", "priority": 1,  # NORMAL
+        })
+        assert r.status_code == 202
+        assert r.json()["status"] == "delivered"
+
+        notify = json.loads(ws.receive_text())
+        assert notify["type"] == "notify"
+        assert notify["priority"] == 1
+
+        # No TTS framing should follow for a NORMAL notification. The next
+        # readable frame would block — assert TTS was never synthesized.
+        assert app.state.bridge.tts.calls == []
+
+
+def test_notify_delivered_status_when_device_connected():
+    app = _make_app()
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(_hello())
+        ws.receive_text()
+        ws.receive_text()
+        r = client.post("/notify", json={"title": "x", "priority": 1})
+        assert r.json()["status"] == "delivered"
+
+
+def test_notify_queued_when_no_device():
+    app = _make_app()
+    client = TestClient(app)
+    # No WS connection
+    r = client.post("/notify", json={"title": "x", "priority": 1})
+    assert r.status_code == 202
+    assert r.json()["status"] == "queued"
+
+
+def test_notify_ack_round_trip():
+    """Task 3闭环: device sends notify_ack -> bridge records the ack."""
+    app = _make_app()
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(_hello())
+        ws.receive_text()  # hello
+        ws.receive_text()  # status: idle
+
+        # requires_ack so the queue tracks it as awaiting ack. Use NORMAL
+        # priority so no TTS announcement interleaves with the ack reply
+        # (the audio cue is exercised in its own test above).
+        r = client.post("/notify", json={
+            "title": "Assigned", "priority": 1, "requires_ack": True,
+        })
+        nid = r.json()["notification_id"]
+        assert app.state.bridge.notifications.awaiting_ack_count == 1
+
+        notify = json.loads(ws.receive_text())
+        assert notify["requires_ack"] is True
+        assert notify["notification_id"] == nid
+
+        # Device acks (e.g. from a dismiss button press)
+        ws.send_text(json.dumps({"type": "notify_ack", "notification_id": nid}))
+        ack_reply = json.loads(ws.receive_text())
+        assert ack_reply["type"] == "ack_received"
+        assert ack_reply["notification_id"] == nid
+
+        assert app.state.bridge.notifications.awaiting_ack_count == 0
+        hist = app.state.bridge.notifications.history
+        assert any(n.id == nid and n.acked_at is not None for n in hist)
