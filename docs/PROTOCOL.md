@@ -109,10 +109,28 @@ POST /notify
 
 | Value | Name | Behavior |
 |-------|------|----------|
-| 0 | LOW | Background ticker, no chime |
-| 1 | NORMAL | Standard notification, single chime |
-| 2 | HIGH | Important, persistent until ack |
-| 3 | URGENT | Breaks quiet hours, persistent + repeated chime |
+| 0 | LOW | Background ticker, no chime, no spoken cue |
+| 1 | NORMAL | Standard notification card, no spoken cue |
+| 2 | HIGH | Important, persistent until ack, **spoken TTS announcement** |
+| 3 | URGENT | Breaks quiet hours, persistent until ack, **spoken TTS announcement** |
+
+### Audio Cue (HIGH/URGENT)
+
+For `priority >= HIGH` (2 or 3), the bridge synthesizes a short spoken
+announcement and streams it to the device immediately after the `notify`
+control frame, using the same TTS framing as a voice reply:
+
+```
+bridge -> device:  {"type":"notify", ...}
+bridge -> device:  {"type":"tts","action":"start","sample_rate":16000}
+bridge -> device:  <binary PCM chunks, 20 ms / 640 B>
+bridge -> device:  {"type":"tts","action":"stop"}
+```
+
+The announcement text is derived from the title (and a short body if
+present): e.g. `"Heads up. Deploy FAILED: hermes-desk. prod rollback"`.
+NORMAL/LOW notifications show the on-screen card only — no spoken cue, so
+they don't interrupt.
 
 ### Categories
 
@@ -124,7 +142,7 @@ Non-urgent notifications (priority < URGENT) are suppressed during quiet hours
 (`POST /notify` returns `{"status": "suppressed", "reason": "quiet_hours"}`).
 Configurable via `config.yaml` `notification.quiet_hours` section.
 
-### Acknowledgment
+### Acknowledgment & Dismiss
 
 When `requires_ack: true`, the device must send `notify_ack` back:
 
@@ -134,6 +152,28 @@ When `requires_ack: true`, the device must send `notify_ack` back:
 
 The bridge confirms with `ack_received`. If no ack arrives within the configured
 timeout (default 30s), the notification expires.
+
+On the Tab5 firmware, the notification card renders a **Dismiss** button.
+Tapping it sends `notify_ack` for the active `notification_id` (via
+`hermes_ws_send_notify_ack`) and returns the display to the status layout,
+so a single tap both clears the card and acknowledges the notification.
+
+### Hermes Cron / Webhook Wiring
+
+Hermes automation (a `hermes cron` job, an n8n workflow, a Linear webhook, or
+a shell one-liner) pushes notifications via the bridge's `POST /notify`. The
+`hermes_bridge.notify_cli` module is the turnkey sender:
+
+```bash
+# ad-hoc
+python -m hermes_bridge.notify_cli --bridge http://moto-agent-host:8765 \
+    --title "Deploy failed" --priority 3 --requires-ack
+
+# named cron template (see cron_templates.py)
+python -m hermes_bridge.notify_cli --template deploy_failed \
+    --var service=hermes-desk --var branch=main --var error=refused \
+    --var log_url=https://ci/123
+```
 
 ### History
 

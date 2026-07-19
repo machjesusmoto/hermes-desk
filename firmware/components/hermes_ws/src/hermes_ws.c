@@ -279,6 +279,21 @@ esp_err_t hermes_ws_send_abort(void)
     return r;
 }
 
+esp_err_t hermes_ws_send_notify_ack(const char *notification_id)
+{
+    if (!notification_id || !notification_id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "type", HERMES_TYPE_NOTIFY_ACK);
+    cJSON_AddStringToObject(o, "notification_id", notification_id);
+    char *s = cJSON_PrintUnformatted(o);
+    esp_err_t r = hermes_ws_send_text(s);
+    free(s);
+    cJSON_Delete(o);
+    return r;
+}
+
 esp_err_t hermes_ws_send_audio(const uint8_t *pcm, size_t len)
 {
     if (!s_ctx.client || !pcm || !len) return ESP_ERR_INVALID_ARG;

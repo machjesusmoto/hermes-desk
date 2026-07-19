@@ -82,6 +82,14 @@ esp_err_t hermes_ws_send_listen_stop(void);
 esp_err_t hermes_ws_send_abort(void);
 
 /**
+ * Send a notify_ack (device -> bridge) for a proactive notification, e.g.
+ * when the user taps the dismiss button on a notification card. The bridge
+ * uses this to mark the notification acknowledged and stop awaiting ack.
+ * `notification_id` is the id from the inbound notify frame (NUL-terminated).
+ */
+esp_err_t hermes_ws_send_notify_ack(const char *notification_id);
+
+/**
  * Send a binary PCM audio frame (device -> bridge). `pcm` must be a whole
  * number of 20 ms frames (multiples of 640 B) per the protocol, though the
  * bridge simply accumulates bytes, so partial frames are tolerated.

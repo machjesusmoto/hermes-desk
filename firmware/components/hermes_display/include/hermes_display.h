@@ -67,9 +67,31 @@ void hermes_display_clear_conversation(void);
 
 /* ---- status_card (notifications) ---------------------------------------- */
 
-/** Show a proactive notification card. `level` is "info"/"warning"/"urgent". */
+/**
+ * Show a proactive notification card. `level` is one of
+ * "info"/"warning"/"error"/"success" (bridge set) or "urgent" (legacy alias).
+ * `notification_id` is the bridge-assigned id used to ack the notification;
+ * pass "" if unknown (no ack will be sent on dismiss).
+ * `priority` (0..3) controls the accent and whether a "Dismiss" button is
+ * shown; HIGH/URGENT cards persist until dismissed, NORMAL/LOW auto-dismiss.
+ *
+ * Renders a Dismiss button that, when tapped, sends notify_ack for the given
+ * notification_id (via the callback registered with
+ * hermes_display_set_dismiss_cb) and returns the device to the status layout.
+ */
 void hermes_display_show_notification(const char *title, const char *body,
-                                      const char *level);
+                                      const char *level,
+                                      const char *notification_id,
+                                      int priority);
+
+/**
+ * Register the callback invoked when the user taps the Dismiss button on a
+ * notification card. The callback receives the notification_id of the card
+ * being dismissed. The bridge expects a notify_ack frame for that id; the
+ * callback is the firmware's hook to send it (see hermes_ws_send_notify_ack).
+ */
+typedef void (*hermes_dismiss_cb_t)(const char *notification_id);
+void hermes_display_set_dismiss_cb(hermes_dismiss_cb_t cb);
 
 /* ---- error --------------------------------------------------------------- */
 
